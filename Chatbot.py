@@ -56,24 +56,30 @@ recursive_text_splitter = RecursiveCharacterTextSplitter(
     chunk_overlap=20)
 
 
-def ChatBot():
+def ChatBot(file_processed: FAISS):
     st.title("Ask questions about the PDF")
 
-    if st.session_state.processed_book:
-        prompt = st.chat_input("Say something")
+    for i in st.session_state.messages:
+            user_msg = st.chat_message("user", avatar="💀")
+            user_msg.write(i[0])
+            computer_msg = st.chat_message("assistant", avatar="✨")
+            computer_msg.write(i[1])
+
 
     if prompt := st.chat_input("Ask questions about the article"):
        # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
-            # Display user message in chat message container
+        # Display user message in chat message container
         with st.chat_message("user"):
             st.markdown(prompt)
+
+        match = "Given the following information " + (file_processed.search(prompt, "similarity")[0]).page_content + "answer the following question" +  prompt 
 
         with st.chat_message("assistant"):
             stream = client.chat.completions.create(
                 model = st.session_state["llm"],
                 messages=[
-                    {"role": m["role"], "content": m["content"]}
+                    {"role": m["role"], "content": match}
                     for m in st.session_state.messages
                 ],
                 stream=True,
@@ -91,9 +97,6 @@ def initialization(flag=False):
     if "llm" not in st.session_state:
         st.session_state["llm"] = "lmstudio-ai/gemma-2b-it-GGUF"
 
-    if 'book_docsearch' not in st.session_state:
-        st.session_state.processed_book = None
-
 def main():
     initialization(True)
 
@@ -102,8 +105,7 @@ def main():
     uploaded_files = st.file_uploader("Upload an article", type="pdf", accept_multiple_files=False)
 
     if uploaded_files:
-        process_file(uploaded_files)
-        ChatBot()
-
+        file_processed = process_file(uploaded_files)
+        ChatBot(file_processed)
 
 main()
