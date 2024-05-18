@@ -1,4 +1,3 @@
-import PyPDF2
 from PyPDF2 import PdfReader
 import streamlit as st
 from langchain_community.vectorstores import FAISS
@@ -56,43 +55,45 @@ recursive_text_splitter = RecursiveCharacterTextSplitter(
     chunk_overlap=20)
 
 
+
 def ChatBot(file_processed: FAISS):
     st.title("Ask questions about the PDF")
 
-    for i in st.session_state.messages:
-            user_msg = st.chat_message("user", avatar="💀")
-            user_msg.write(i[0])
-            computer_msg = st.chat_message("assistant", avatar="✨")
-            computer_msg.write(i[1])
-
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
     if prompt := st.chat_input("Ask questions about the article"):
        # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
+        match = "Given the following information " + (file_processed.search(prompt, "similarity")[0]).page_content + "answer the following question" +  prompt 
+        st.session_state.augmented_messages.append({"role": "user", "content": match})
         # Display user message in chat message container
         with st.chat_message("user"):
-            st.markdown(prompt)
-
-        match = "Given the following information " + (file_processed.search(prompt, "similarity")[0]).page_content + "answer the following question" +  prompt 
+            st.markdown(prompt)     
 
         with st.chat_message("assistant"):
             stream = client.chat.completions.create(
                 model = st.session_state["llm"],
                 messages=[
-                    {"role": m["role"], "content": match}
-                    for m in st.session_state.messages
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.augmented_messages
                 ],
                 stream=True,
                 temperature=0.7,
             )
             response = st.write_stream(stream)
         st.session_state.messages.append({"role": "assistant", "content": response})
+        st.session_state.augmented_messages.append({"role": "assistant", "content": response})
 
 
 def initialization(flag=False):
     # Initialize chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
+
+    if "augmented_messages" not in st.session_state:
+        st.session_state.augmented_messages=[]
 
     if "llm" not in st.session_state:
         st.session_state["llm"] = "lmstudio-ai/gemma-2b-it-GGUF"
