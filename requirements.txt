@@ -1,0 +1,6 @@
+PyPDF2
+langchain
+langchain-community
+streamlit
+typing_extensions
+openai
