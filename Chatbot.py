@@ -46,14 +46,12 @@ def process_file(file):
     # Limit the no of characters, remove \n
     book_documents = [Document(page_content = text.page_content.replace("\n", " ").replace(".", "").replace("-", "")) for text in book_documents]
     docsearch = FAISS.from_documents(book_documents, LMStudioEmbedding())
-    return docsearch
-
-                    
+    docsearch.save_local(f"db/vector")
+    return docsearch                  
 
 recursive_text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=2000,
     chunk_overlap=20)
-
 
 
 def ChatBot(file_processed: FAISS):
@@ -66,13 +64,15 @@ def ChatBot(file_processed: FAISS):
     if prompt := st.chat_input("Ask questions about the article"):
        # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
-        match = "Given the following information " + (file_processed.search(prompt, "similarity")[0]).page_content + "answer the following question" +  prompt 
-        st.session_state.augmented_messages.append({"role": "user", "content": match})
-        # Display user message in chat message container
         with st.chat_message("user"):
-            st.markdown(prompt)     
+            st.markdown(prompt)
+ 
+        # Display user message in chat message container
 
         with st.chat_message("assistant"):
+            match = "The following is a relevant extract of a PDF document from which I will ask you a question: \n\n" + " ".join((d.page_content for d in file_processed.search(prompt, "similarity", k=3))) + "\n\n Given the previous extract, answer the following query: \n\n " +  prompt 
+            st.session_state.augmented_messages.append({"role": "user", "content": match})
+
             stream = client.chat.completions.create(
                 model = st.session_state["llm"],
                 messages=[
@@ -98,6 +98,11 @@ def initialization(flag=False):
     if "llm" not in st.session_state:
         st.session_state["llm"] = "lmstudio-ai/gemma-2b-it-GGUF"
 
+    if "documents_processed" not in st.session_state:
+        st.session_state.documents_processed=[]
+
+
+
 def main():
     initialization(True)
 
@@ -106,7 +111,11 @@ def main():
     uploaded_files = st.file_uploader("Upload an article", type="pdf", accept_multiple_files=False)
 
     if uploaded_files:
-        file_processed = process_file(uploaded_files)
-        ChatBot(file_processed)
+        if st.session_state.documents_processed.count==0:
+            processed_file = process_file(uploaded_files)
+            st.session_state.documents_processed.append({"role": "system", "content": "a document processed"})
+
+        processed__file = FAISS.load_local(f"db/vector", LMStudioEmbedding(), allow_dangerous_deserialization=True)
+        ChatBot(processed__file)
 
 main()
