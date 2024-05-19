@@ -1,121 +1,54 @@
-from PyPDF2 import PdfReader
 import streamlit as st
 from langchain_community.vectorstores import FAISS
-from langchain.chains import RetrievalQA
-from langchain_core.documents import Document
-from langchain_core.embeddings import Embeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from typing import Any, Dict, List, Optional
 from openai import OpenAI
+from analize_prompt import analyze_prompt
+from embeddings import LMStudioEmbedding
 
-#Initialize model
 client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
-def get_embedding(text, model="nomic-ai/nomic-embed-text-v1.5-GGUF"):
-   #text = text.replace("\n", " ")
-   return client.embeddings.create(input = [text], model=model).data[0].embedding
 
-class LMStudioEmbedding(Embeddings):
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        texts_embedded = []
-        for text in texts:
-            chunk_embedded =  get_embedding(text)
-            texts_embedded.append(chunk_embedded)
-        return texts_embedded
-
-    def embed_query(self, text: str) -> List[float]:
-        return get_embedding(text)    
-
-
-# For reading PDFs and returning text string
-def read_pdf(file):
-    file_content=""
-    # Create a PDF file reader object
-    pdf_reader = PdfReader(file)
-    # Get the total number of pages in the PDF
-    num_pages = len(pdf_reader.pages)
-    # Iterate through each page and extract text
-    for page_num in range(num_pages):
-        # Get the page object
-        page = pdf_reader.pages[page_num]
-        file_content += page.extract_text()
-    return file_content
-
-def process_file(file):
-    file_content = read_pdf(file)
-    book_documents = recursive_text_splitter.create_documents([file_content])
-    # Limit the no of characters, remove \n
-    book_documents = [Document(page_content = text.page_content.replace("\n", " ").replace(".", "").replace("-", "")) for text in book_documents]
-    docsearch = FAISS.from_documents(book_documents, LMStudioEmbedding())
-    docsearch.save_local(f"db/vector")
-    return docsearch                  
-
-recursive_text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=2000,
-    chunk_overlap=20)
-
-
-def ChatBot(file_processed: FAISS):
-    st.title("Ask questions about the PDF")
-
+def display_chat_history():
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Ask questions about the article"):
-       # Add user message to chat history
+def submit_to_llm():
+    return client.chat.completions.create(
+        model=st.session_state["llm"],
+        messages=[
+            {"role": m["role"], "content": m["content"]}
+            for m in st.session_state.augmented_messages if m["role"] == "user"
+        ][-4:],
+        stream=True,
+        temperature=0.7,
+    )
+
+def refine_prompt(prompt: str, file_processed: FAISS, search_method:str, k_value:int) -> str:
+    context = " ".join(d.page_content for d in file_processed.search(prompt, search_type=search_method, k=k_value))
+    return f"Given the following information: \n\n{context}\n\n answer the following question: \n\n{prompt}"
+
+def handle_user_input(file_processed: FAISS):
+    prompt = st.chat_input("Ask questions about the article")
+    if prompt:
+        analysis = analyze_prompt(prompt)
+        search_method = analysis["search_method"]
+        k = analysis["k"]
+        st.write(search_method,k)
+
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
- 
-        # Display user message in chat message container
 
         with st.chat_message("assistant"):
-            match = "The following is a relevant extract of a PDF document from which I will ask you a question: \n\n" + " ".join((d.page_content for d in file_processed.search(prompt, "similarity", k=3))) + "\n\n Given the previous extract, answer the following query: \n\n " +  prompt 
-            st.session_state.augmented_messages.append({"role": "user", "content": match})
+            refined_prompt = refine_prompt(prompt, file_processed, search_method, k)
+            st.session_state.augmented_messages.append({"role": "user", "content": refined_prompt})
 
-            stream = client.chat.completions.create(
-                model = st.session_state["llm"],
-                messages=[
-                    {"role": m["role"], "content": m["content"]}
-                    for m in st.session_state.augmented_messages
-                ],
-                stream=True,
-                temperature=0.7,
-            )
+            stream = submit_to_llm()
             response = st.write_stream(stream)
+
         st.session_state.messages.append({"role": "assistant", "content": response})
         st.session_state.augmented_messages.append({"role": "assistant", "content": response})
 
-
-def initialization(flag=False):
-    # Initialize chat history
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    if "augmented_messages" not in st.session_state:
-        st.session_state.augmented_messages=[]
-
-    if "llm" not in st.session_state:
-        st.session_state["llm"] = "lmstudio-ai/gemma-2b-it-GGUF"
-
-    if "documents_processed" not in st.session_state:
-        st.session_state.documents_processed=[]
-
-
-
-def main():
-    initialization(True)
-
-    st.set_page_config("Chatbot","💬")
-    st.title("📝 Upload a file")
-    uploaded_files = st.file_uploader("Upload an article", type="pdf", accept_multiple_files=False)
-
-    if uploaded_files:
-        if st.session_state.documents_processed.count==0:
-            processed_file = process_file(uploaded_files)
-            st.session_state.documents_processed.append({"role": "system", "content": "a document processed"})
-
-        processed__file = FAISS.load_local(f"db/vector", LMStudioEmbedding(), allow_dangerous_deserialization=True)
-        ChatBot(processed__file)
-
-main()
+def ChatBot(file_processed: FAISS):
+    st.title("Ask questions about the PDF")
+    display_chat_history()
+    handle_user_input(file_processed)
