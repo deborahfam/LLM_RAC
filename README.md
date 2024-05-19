@@ -1,5 +1,5 @@
 # LLM_RAG
-Implementation in Streamlit of a RAC chatbot using Llms
+Implementation in Streamlit of a RAG chatbot using Llms
 
 How to run the project:
 
